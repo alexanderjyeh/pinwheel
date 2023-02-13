@@ -6,11 +6,8 @@ Created on Tue Jan 31 09:24:17 2023
 """
 
 import math
-from random import sample
+from random import randint
 from collections import namedtuple
-
-import matplotlib.pyplot as plt
-import numpy as np
 
 class Point(namedtuple('Point', 'x y')):
     def __repr__(self):
@@ -67,21 +64,52 @@ def move_direction(p, vec, dist=1):
     unit = vec/vec.magnitude()
     return p + unit*dist
 
-def shrink_line(p1, p2, dist):
-    """Returns first and last point on the line segment which is 2*dist shorter
-    than p1-p2"""
-    p1p2 = move_along(p1, p2, dist)
-    p2p1 = move_along(p2, p1, dist)
-    return p1p2, p2p1
-
 def midpoint(p1, p2):
     """Returns a Point midway between p1 and p2"""
     x = (p1.x + p2.x)/2
     y = (p1.y + p2.y)/2
     return Point(x, y)
 
+def limit(val, low=0, high=256):
+    """returns 0 if val<0 and 256 if val >256"""
+    if val < low:
+        return 0
+    if val > high:
+        return high
+    return val
+
+def rgb_step(rgb_tuple, size=8):
+    """Given an rgb tuple, steps up size in each color, capped between 0 and 256"""
+    dr = randint(-size, size)
+    dg = randint(-size, size)
+    db = randint(-size, size)
+    
+    rgb_tuple = (limit(rgb_tuple[0]+dr), 
+                 limit(rgb_tuple[1]+dg), 
+                 limit(rgb_tuple[2]+db))
+    
+    return rgb_tuple
+
+def rgb_advance(rgb_tuple, rgb_dir, size=4, memory=0.5):
+    """Advances rgb tuple one step along given direction, with specified random noise"""
+    drgb_tuple = (randint(-size, size), randint(-size, size), randint(-size, size))
+    rgb_tuple = tuple([curr+vec+noise for curr, vec, noise in zip(rgb_tuple, rgb_dir, drgb_tuple)])
+    rgb_dir = tuple([int(vec+noise/memory) for vec, noise in zip(rgb_dir, drgb_tuple)])
+    return rgb_tuple, rgb_dir
+
+def rgb_to_hex(rgb_tuple):
+    """Given a tuple of ints from 0-256, returns a string corresponding to a hex color code"""
+    code = ""
+    for channel in rgb_tuple:
+        if channel < 16:  #requires padding
+            code += '0' + hex(channel)[2:]
+        else:
+            code += hex(channel)[2:]
+    return code
+
 class Triangle:
-    def __init__(self, a, b, c, strokewidth=1, sizelimit=2.5):
+    def __init__(self, a, b, c, strokewidth=1, sizelimit=2.5, 
+                 color=(128, 128, 128), color_vec=(0,0,0)):
         """Each vertex of the 1,2,sqrt(5) triangle is saved as diagrammed below.
          a
          |\
@@ -94,14 +122,18 @@ class Triangle:
         self.c = c
         self.com = (a+b+c)/3 # center of mass
         self.size = (b-c).magnitude() # length of shortest side
+        
         self.strokewidth = strokewidth
         self.sizelimit = sizelimit
+        self.color = color
+        self.color_vec = color_vec
+        
         rise = (self.b.y - self.a.y)
         run = (self.b.x - self.a.x)
         if run != 0:
             self.slope = rise/run
         else:
-            self.slope = np.Inf
+            self.slope = float('infinity')
     
     def __repr__(self):
         return f"tip:{self.a}, side:{self.b}, square:{self.c}"
@@ -148,11 +180,20 @@ class Triangle:
         iii = midpoint(self.c, ii, )
         iv = midpoint(self.a, self.c)
         
-        return (Triangle(self.a, iv, i, strokewidth=self.strokewidth, sizelimit=self.sizelimit),
-                Triangle(ii, iv, i, strokewidth=self.strokewidth, sizelimit=self.sizelimit),
-                Triangle(iv, ii, iii, strokewidth=self.strokewidth, sizelimit=self.sizelimit),
-                Triangle(self.c, self.b, ii, strokewidth=self.strokewidth, sizelimit=self.sizelimit),
-                Triangle(iv, self.c, iii, strokewidth=self.strokewidth, sizelimit=self.sizelimit))
+        #get 5 random colors
+        #colors = [rgb_step(self.color) for i in range(5)]
+        colors = [rgb_advance(self.color, self.color_vec) for i in range(5)]
+        
+        return (Triangle(self.a, iv, i, color = colors[0][0], color_vec = colors[0][1],
+                         strokewidth=self.strokewidth, sizelimit=self.sizelimit),
+                Triangle(ii, iv, i, color = colors[1][0], color_vec = colors[1][1],
+                         strokewidth=self.strokewidth, sizelimit=self.sizelimit),
+                Triangle(iv, ii, iii, color = colors[2][0], color_vec = colors[2][1],
+                         strokewidth=self.strokewidth, sizelimit=self.sizelimit),
+                Triangle(self.c, self.b, ii, color = colors[3][0], color_vec = colors[3][1],
+                         strokewidth=self.strokewidth, sizelimit=self.sizelimit),
+                Triangle(iv, self.c, iii, color = colors[4][0], color_vec = colors[4][1],
+                         strokewidth=self.strokewidth, sizelimit=self.sizelimit))
     
     def svg(self, style=None):
         """Returns string containing svg path following the triangle.
@@ -194,6 +235,11 @@ class Triangle:
         second = f'Q {iii.x} {iii.y} {self.c.x} {self.c.y}'
         third = f'Q {iii.x} {iii.y} {self.a.x} {self.a.y}"/>\n'
         return first + second + third
+    
+    def svg_filled(self):
+        """returns svg with triangle filled with it's color and no border"""
+        style = f'style="fill:#{rgb_to_hex(self.color)};stroke:#{rgb_to_hex(self.color)};stroke-width:0.1;stroke-linejoin:round"'
+        return f'<path {style} d="M{self.a.x} {self.a.y} L{self.b.x} {self.b.y} L{self.c.x} {self.c.y} Z"/>\n'
         
 def subdivide_all(coll):
     """Given a collection of objects, calls subdivide for each object and returns a single list"""
@@ -221,6 +267,12 @@ def subdivide_rand(coll, n, cutoff=5):
         else:
             min_size.add(current)
     return min_size
+    
+def rect(p1, p2, p3, p4, style=None):
+    """Returns a rectangular path"""
+    if style is None:
+        style = f'style="fill:none;stroke:#ff0000;stroke-width:0.1;stroke-linejoin:round"'
+    return f'<path {style} d="M{p1.x} {p1.y} L{p2.x} {p2.y} L{p3.x} {p3.y} L{p4.x} {p4.y} Z"/>\n'
     
 svg_opening = """<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <!-- Created with Inkscape (http://www.inkscape.org/) -->
@@ -257,27 +309,13 @@ if __name__=="__main__":
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(svg_opening)
             for tri in shapes:
-                f.write(tri.svg_tabs())
+                f.write(tri.svg_filled())
             for tri in min_shapes:
-                f.write(tri.svg_tabs())
+                f.write(tri.svg_filled())
+            f.write(rect(Point(0,0), 
+                         Point(147,0), 
+                         Point(147, 274),
+                         Point(0, 274)))
             f.write(svg_ending)
-    
-    #%%
-    shapes.update(min_shapes)
-    sizes, slopes = [], []
-    for tri in shapes:
-        sizes.append(tri.size)
-        slopes.append(tri.slope)
-    
-    sizes = np.array(sizes)
-    slopes = np.array(slopes)
-    
-    fig, axs = plt.subplots(1, 2,
-                            gridspec_kw=dict(left=0.05, right=0.99,
-                                             bottom=0.1, top=0.9))
-    axs[0].hist(sizes, bins=np.linspace(sizes.min(), sizes.max()))
-    axs[0].set_title("size distribution")
-    axs[1].hist(slopes[np.isfinite(slopes)], bins=np.linspace(-6,6))
-    axs[1].set_title("hypotenuse slope distribution")
     
     
