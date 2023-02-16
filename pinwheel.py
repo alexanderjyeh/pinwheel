@@ -354,10 +354,8 @@ if __name__=="__main__":
             f.write(svg_opening)
             for tri in shapes:
                 f.write(tri.svg_center_tabs())
-                f.write(tri.svg())
             for tri in min_shapes:
                 f.write(tri.svg_center_tabs())
-                f.write(tri.svg())
             f.write(rect(Point(0,0), 
                          (a - x_off) + y_off, 
                          d + x_off + y_off,
