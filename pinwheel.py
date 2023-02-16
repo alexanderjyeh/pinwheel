@@ -22,6 +22,9 @@ class Point(namedtuple('Point', 'x y')):
     def __mul__(self, b):
         return Point(self.x*b, self.y*b)
     
+    def __rmul__(self, b):
+        return Point(self.x*b, self.y*b)
+    
     def __truediv__(self, b):
         return Point(self.x/b, self.y/b)
     
@@ -147,6 +150,13 @@ class Triangle:
     def __ne__(self, b):
         return self.a != tri.a or self.b != tri.b or self.c != tri.c
     
+    def offset(self, p):
+        """adds p to each point in triangle"""
+        return Triangle(self.a + p, self.b + p, self.c + p,
+                        strokewidth = self.strokewidth,
+                        sizelimit = self.sizelimit,
+                        color = self.color, color_vec = self.color_vec)
+    
     def inset(self, inset=None):
         """Returns the intersections of ab, bc, ca inset by the specified about"""
         if inset is None:
@@ -199,21 +209,46 @@ class Triangle:
         """Returns string containing svg path following the triangle.
         """
         if style is None:
-            style = f'style="fill:none;stroke:#ff0000;stroke-width:{self.strokewidth};stroke-linejoin:round"'
+            style = f'style="fill:none;stroke:#ffffff;stroke-width:{self.strokewidth};stroke-linejoin:round"'
         return f'<path {style} d="M{self.a.x} {self.a.y} L{self.b.x} {self.b.y} L{self.c.x} {self.c.y} Z"/>\n'
 
-    def svg_tabs(self, tab_size=0.1):
+    def svg_center_tabs(self, tab_size = 0.2):
         style = 'style="fill:none;stroke:#ff0000;stroke-width:0.1;stroke-linejoin:round"'
         
         a_inset, b_inset, c_inset = self.inset()
         
-        #calculate segments with small tab at inset
-        ab = move_along(a_inset, b_inset, 4*tab_size)
-        ba = move_along(b_inset, a_inset, 2*tab_size)
-        bc = move_along(b_inset, c_inset, tab_size) 
-        cb = move_along(c_inset, b_inset, 1.5*tab_size)
-        ca = move_along(c_inset, a_inset, 1.5*tab_size)
-        ac = move_along(a_inset, c_inset, 4*tab_size)
+        ab_mid = midpoint(a_inset, b_inset)
+        bc_mid = midpoint(b_inset, c_inset)
+        ca_mid = midpoint(c_inset, a_inset)
+        
+        #calculate segments so that there is a tab with tab_size at midpoint
+        ab_amid = move_along(ab_mid, a_inset, tab_size/2)
+        ab_bmid = move_along(ab_mid, b_inset, tab_size/2)
+        bc_bmid = move_along(bc_mid, b_inset, tab_size/2)
+        bc_cmid = move_along(bc_mid, c_inset, tab_size/2)
+        ca_cmid = move_along(ca_mid, c_inset, tab_size/2)
+        ca_amid = move_along(ca_mid, a_inset, tab_size/2)
+        
+        
+        first = f'<path {style} d="M{ca_amid.x} {ca_amid.y} L {a_inset.x} {a_inset.y} L {ab_amid.x} {ab_amid.y}"/>'
+        second = f'<path {style} d="M{ab_bmid.x} {ab_bmid.y} L {b_inset.x} {b_inset.y} L {bc_bmid.x} {bc_bmid.y}"/>'
+        third = f'<path {style} d="M{bc_cmid.x} {bc_cmid.y} L {c_inset.x} {c_inset.y} L {ca_cmid.x} {ca_cmid.y}"/>\n'
+        return first + second + third
+
+    def svg_tabs(self, tab_size = 0.25):
+        style = 'style="fill:none;stroke:#ff0000;stroke-width:0.1;stroke-linejoin:round"'
+        
+        a_inset, b_inset, c_inset = self.inset()
+        
+        rt5 = math.sqrt(5)
+        
+        #calculate segments so that there is tab_size between end of each line
+        ab = move_along(a_inset, b_inset,       rt5 * tab_size)
+        ba = move_along(b_inset, a_inset,   (rt5/2) * tab_size)
+        bc = move_along(b_inset, c_inset,       0.5 * tab_size)
+        cb = move_along(c_inset, b_inset,   (rt5/5) * tab_size)
+        ca = move_along(c_inset, a_inset, (2*rt5/5) * tab_size)
+        ac = move_along(a_inset, c_inset,         2 * tab_size)
         
         first = f'<path {style} d="M{ab.x} {ab.y} L {ba.x} {ba.y}"/> '
         second = f'<path {style} d="M{bc.x} {bc.y} L {cb.x} {cb.y}"/> '
@@ -242,12 +277,16 @@ class Triangle:
         return f'<path {style} d="M{self.a.x} {self.a.y} L{self.b.x} {self.b.y} L{self.c.x} {self.c.y} Z"/>\n'
         
 def subdivide_all(coll):
-    """Given a collection of objects, calls subdivide for each object and returns a single list"""
+    """Given a set of Triangles, calls subdivide for each Triangle and returns a single list"""
     assert len(coll) > 0, "subdivide requires a non empty list"
     
-    temp = []
-    for shape in coll:
-        temp.extend(shape.subdivide())
+    temp = set()
+    for tri in list(coll):
+        current = coll.pop()
+        if tri.size > tri.sizelimit:
+            temp.update(current.subdivide())
+        else:
+            temp.add(current)
     return temp
 
 def subdivide_rand(coll, n, cutoff=5):
@@ -258,7 +297,7 @@ def subdivide_rand(coll, n, cutoff=5):
     assert len(coll) > 0, "subdivide requires a non empty list"
     
     min_size = set()
-    for i in range(n):
+    for _ in range(n):
         if len(coll) ==0:
             return min_size
         current = coll.pop()
@@ -293,29 +332,53 @@ svg_ending = '\n</svg>'
 
 if __name__=="__main__":
     
-    offset = Point(10, 10)
-    a = Point(0,254) + offset
-    b = Point(127,0) + offset
-    c = offset
-    d = a+b-offset
+    base = 80
+    x_off = Point(4.5, 0)
+    y_off = Point(0, 4.5)
+    a =     Point(0, 2 * base) + x_off + y_off
+    b =     Point(base, 0) + x_off + y_off
+    c =     x_off + y_off
+    d =     a + b - (x_off + y_off)
     
     shapes = set([Triangle(a, b, c, sizelimit=5),
                   *Triangle(b, a, d, sizelimit=5).subdivide()])
     min_shapes = set()
-    for level in range(10):
-        min_shapes.update(subdivide_rand(shapes, 200*level))
+    
+    for level in range(9):
+        min_shapes.update(subdivide_rand(shapes, 50*level))
+        # shapes = subdivide_all(shapes)
     
         filename = f'pinwheel_level{level}.svg'
         with open(filename, 'w', encoding='utf-8') as f:
+            print(len(min_shapes) + len(shapes))
             f.write(svg_opening)
             for tri in shapes:
-                f.write(tri.svg_filled())
+                f.write(tri.svg_center_tabs())
+                f.write(tri.svg())
             for tri in min_shapes:
-                f.write(tri.svg_filled())
+                f.write(tri.svg_center_tabs())
+                f.write(tri.svg())
             f.write(rect(Point(0,0), 
-                         Point(147,0), 
-                         Point(147, 274),
-                         Point(0, 274)))
+                         (a - x_off) + y_off, 
+                         d + x_off + y_off,
+                         (b - y_off) + x_off))
+            f.write(rect(Point(0,0), 
+                         Point(8*25.4, 0),
+                         Point(8*25.4, 10.5*25.4),
+                         Point(        0, 10.5*25.4)))
+            
+            bc_len = 5
+            first_vertex = a + 2*y_off
+            shift = Point(2 * bc_len, 0)
+            for tab_size in (0.1, 0.15, 0.2, 0.25, 0.5):
+                small = Triangle(first_vertex, 
+                                 first_vertex + Point(0, 2*bc_len),
+                                 first_vertex + Point(bc_len, 0))
+                f.write(small.svg_center_tabs(tab_size = tab_size))
+                first_vertex += shift
             f.write(svg_ending)
+            
+    # with open(filename, 'w', encoding='utf-8') as f:
+    #     pass
     
     
